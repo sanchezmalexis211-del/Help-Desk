@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "516457410120",
+    "project_id": "tickets-eff42",
+    "storage_bucket": "tickets-eff42.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:516457410120:android:c55ec4049e28fc6b3cb27d",
+        "android_client_info": {
+          "package_name": "com.tuempresa.help_desk_app_2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB6k7ZPrG8au_tOeyES00Cp_Qpayqi9JvY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
