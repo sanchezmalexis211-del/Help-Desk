@@ -5,6 +5,7 @@ import '../../core/theme.dart';
 import '../../widgets/ticket_card.dart';
 import '../../widgets/shimmer_ticket.dart';
 import '../../models/ticket_model.dart';
+import '../shared/ticket_detail_screen.dart';
  
 class TechDashboardScreen extends StatelessWidget {
   const TechDashboardScreen({super.key});
@@ -39,6 +40,9 @@ class TechDashboardScreen extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildDetalleFila('Equipo / Categoría:', ticket.categoria),
+            const SizedBox(height: 8),
+            if (ticket.subcategoria.isNotEmpty)
+              _buildDetalleFila('Subcategoría:', ticket.subcategoria),
             const SizedBox(height: 12),
             _buildDetalleFila('Falla Reportada:', ticket.descripcion),
             const SizedBox(height: 12),
@@ -50,6 +54,28 @@ class TechDashboardScreen extends StatelessWidget {
           ],
         ),
         actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => TicketDetailScreen(
+                    ticketId: ticket.id!,
+                    data: {
+                      'categoria': ticket.categoria,
+                      'descripcion': ticket.descripcion,
+                      'prioridad': ticket.prioridad,
+                      'estado': ticket.estado,
+                      'notaTecnica': ticket.notaTecnica,
+                    },
+                  ),
+                ),
+              );
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.black),
+            child: const Text('💬 Comentarios', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(foregroundColor: AppTheme.textPrimary),
@@ -237,7 +263,9 @@ class TechDashboardScreen extends StatelessWidget {
                 clipBehavior: Clip.none,
                 children: [
                   TicketCard(
-                    titulo: ticket.categoria,
+                    titulo: ticket.subcategoria.isNotEmpty
+                        ? '${ticket.categoria} - ${ticket.subcategoria}'
+                        : ticket.categoria,
                     descripcion: descripcionFn != null
                         ? descripcionFn(ticket)
                         : (procesadoPorIA
@@ -449,7 +477,40 @@ class _ActionSheetTecnicoState extends State<ActionSheetTecnico> {
             ),
           ],
  
-          const SizedBox(height: 32),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TicketDetailScreen(
+                      ticketId: widget.ticket.id!,
+                      data: {
+                        'categoria': widget.ticket.categoria,
+                        'descripcion': widget.ticket.descripcion,
+                        'prioridad': widget.ticket.prioridad,
+                        'estado': widget.ticket.estado,
+                        'notaTecnica': widget.ticket.notaTecnica,
+                      },
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.comment_rounded, size: 18),
+              label: const Text('Ver / Agregar Comentarios'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.black,
+                side: const BorderSide(color: Colors.black),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme.dart';
 import '../../services/db_service.dart';
 import '../../models/ticket_model.dart';
@@ -19,12 +20,15 @@ class _NewTicketScreenState extends State<NewTicketScreen> {
   final TextEditingController _otroController = TextEditingController();
 
   bool _isAnalyzing = false;
-  bool _otroErrorVisible = false; // Muestra error si envía "Otro" vacío
+  bool _otroErrorVisible = false;
 
   String? _equipoSeleccionado;
   String? _sintomaSeleccionado;
 
   static const String _opcionOtro = 'Otro / Describir manualmente';
+
+  List<String> _subcategoriasCargadas = [];
+  bool _cargandoSubcategorias = false;
 
  final List<Map<String, dynamic>> _equipos = [
   {'nombre': 'PC / Computadora', 'icono': Icons.computer_rounded},
@@ -38,55 +42,40 @@ class _NewTicketScreenState extends State<NewTicketScreen> {
   {'nombre': 'Otros', 'icono': Icons.more_horiz_rounded},
 ];
 
-final Map<String, List<String>> _sintomasPorEquipo = {
-  'PC / Computadora': [
-    'No enciende',
-    'Muy lenta / Congelada',
-    'Pantalla negra/azul',
-    'No da video',
-  ],
-
-  'Caja / POS': [
-    'No enciende',
-    'Sistema congelado',
-    'Pantalla azul',
-    'Cajón trabado',
-  ],
-
-  'Base de Datos': [
-    'No guarda reportes',
-    'Error de sincronización',
-    'Lento al cargar',
-    'Error de acceso',
-  ],
-
-  'Red / Router': [
-    'Sin internet',
-    'Intermitente',
-    'Switch apagado',
-    'Cable roto',
-  ],
-
-  'CCTV / DVR': [
-    'Cámara sin señal',
-    'DVR pitando',
-    'No graba',
-    'Visión nocturna falla',
-  ],
-
-  'Impresora': [
-    'Atasco de papel',
-    'No imprime',
-    'Falta tinta',
-    'Error de red',
-  ],
-
-  // NUEVO
-  'Otros': [
-    _opcionOtro,
-  ],
-};
+String _categoriaDocId(String? nombre) {
+    if (nombre == null) return '';
+    if (nombre == 'Otros') return 'otros';
+    return nombre.replaceAll('/', '-');
+  }
   bool get _esOtro => _sintomaSeleccionado == _opcionOtro;
+
+  Future<void> _cargarSubcategorias(String categoria) async {
+    setState(() {
+      _cargandoSubcategorias = true;
+      _subcategoriasCargadas = [];
+    });
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('subcategorias')
+          .doc(_categoriaDocId(categoria))
+          .collection('items')
+          .get();
+      final nombres = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return data['nombre'] as String? ?? '';
+      }).where((n) => n.isNotEmpty).toList();
+      if (mounted) {
+        setState(() {
+          _subcategoriasCargadas = nombres;
+          _cargandoSubcategorias = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _cargandoSubcategorias = false);
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -128,6 +117,7 @@ final Map<String, List<String>> _sintomasPorEquipo = {
       final nuevoTicket = TicketModel(
         descripcion: contextoParaGemini,
         categoria: _equipoSeleccionado!,
+        subcategoria: sintomaFinal,
         prioridad: clasificacionIA['prioridad'] ?? 'Media',
         notaTecnica: clasificacionIA['resumen_tecnico'],
         estado: 'Nuevos',
@@ -135,6 +125,20 @@ final Map<String, List<String>> _sintomasPorEquipo = {
       );
 
       await _dbService.crearTicket(nuevoTicket);
+
+      // Si es "Otros", guardamos la nueva subcategoría en Firestore para futuros reportes
+      if (_equipoSeleccionado == 'Otros' && sintomaFinal.isNotEmpty) {
+        await FirebaseFirestore.instance
+            .collection('subcategorias')
+            .doc('otros')
+            .collection('items')
+            .add({
+          'nombre': sintomaFinal,
+          'detalle': '',
+          'fechaCreacion': FieldValue.serverTimestamp(),
+          'activo': true,
+        });
+      }
 
       // Notificación push al administrador
       String iconoAlerta = nuevoTicket.prioridad == 'Crítica'
@@ -235,12 +239,15 @@ final Map<String, List<String>> _sintomasPorEquipo = {
                             _equipoSeleccionado == equipo['nombre'];
 
                         return GestureDetector(
-                          onTap: () => setState(() {
-                            _equipoSeleccionado = equipo['nombre'];
-                            _sintomaSeleccionado = null;
-                            _otroController.clear();
-                            _otroErrorVisible = false;
-                          }),
+                          onTap: () {
+                            setState(() {
+                              _equipoSeleccionado = equipo['nombre'];
+                              _sintomaSeleccionado = null;
+                              _otroController.clear();
+                              _otroErrorVisible = false;
+                            });
+                            _cargarSubcategorias(equipo['nombre']);
+                          },
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 300),
                             curve: Curves.easeOut,
@@ -292,277 +299,91 @@ final Map<String, List<String>> _sintomasPorEquipo = {
                     const SizedBox(height: 40),
 
                     // ==========================================
-                    // PASO 2: PROBLEMA EXACTO
+                    // PASO 2: PROBLEMA EXACTO (desde Firestore)
                     // ==========================================
-                    AnimatedSize(
-                      duration: const Duration(milliseconds: 400),
-                      curve: Curves.easeInOut,
-                      child: _equipoSeleccionado == null
-                          ? const SizedBox.shrink()
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildHeaderPaso(
-                                    2, 'Selecciona el problema exacto',
-                                    isActive: true),
-                                const SizedBox(height: 16),
-                                ..._sintomasPorEquipo[_equipoSeleccionado]!
-                                    .map((sintoma) {
-                                  final isSelected =
-                                      _sintomaSeleccionado == sintoma;
-                                  final esOpcionOtro =
-                                      sintoma == _opcionOtro;
+                    if (_equipoSeleccionado != null) ...[
+                      _buildHeaderPaso(
+                          2, 'Selecciona el problema exacto',
+                          isActive: true),
+                      const SizedBox(height: 16),
 
-                                  return Padding(
-                                    padding:
-                                        const EdgeInsets.only(bottom: 12.0),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        InkWell(
-                                          onTap: () => setState(() {
-                                            _sintomaSeleccionado = sintoma;
-                                            _otroController.clear();
-                                            _otroErrorVisible = false;
-                                          }),
-                                          borderRadius:
-                                              BorderRadius.circular(16),
-                                          child: AnimatedContainer(
-                                            duration: const Duration(
-                                                milliseconds: 200),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 20, vertical: 18),
-                                            decoration: BoxDecoration(
-                                              color: isSelected
-                                                  ? Colors.grey.shade900
-                                                  : Colors.white,
-                                              borderRadius:
-                                                  BorderRadius.circular(16),
-                                              border: Border.all(
-                                                color: esOpcionOtro && !isSelected
-                                                    ? Colors.grey.shade400
-                                                    : isSelected
-                                                        ? Colors.grey.shade900
-                                                        : Colors.grey.shade200,
-                                                // Borde punteado visual para "Otro"
-                                                width: esOpcionOtro ? 1.5 : 1,
-                                              ),
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Icon(
-                                                  esOpcionOtro
-                                                      ? (isSelected
-                                                          ? Icons.edit_rounded
-                                                          : Icons
-                                                              .edit_outlined)
-                                                      : (isSelected
-                                                          ? Icons
-                                                              .radio_button_checked
-                                                          : Icons
-                                                              .radio_button_unchecked),
-                                                  color: isSelected
-                                                      ? Colors.white
-                                                      : esOpcionOtro
-                                                          ? Colors.grey.shade600
-                                                          : Colors.grey.shade400,
-                                                ),
-                                                const SizedBox(width: 16),
-                                                Expanded(
-                                                  child: Text(
-                                                    sintoma,
-                                                    style: TextStyle(
-                                                      color: isSelected
-                                                          ? Colors.white
-                                                          : Colors.black87,
-                                                      fontWeight: isSelected
-                                                          ? FontWeight.bold
-                                                          : FontWeight.normal,
-                                                      fontSize: 16,
-                                                      fontStyle: esOpcionOtro
-                                                          ? FontStyle.italic
-                                                          : FontStyle.normal,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-
-                                        // Campo de texto que aparece SOLO si eligió "Otro"
-                                        AnimatedSize(
-                                          duration:
-                                              const Duration(milliseconds: 300),
-                                          curve: Curves.easeInOut,
-                                          child: (esOpcionOtro && isSelected)
-                                              ? Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                          top: 10),
-                                                  child: Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .start,
-                                                    children: [
-                                                      TextField(
-                                                        controller:
-                                                            _otroController,
-                                                        maxLength: 120,
-                                                        autofocus: true,
-                                                        onChanged: (_) {
-                                                          if (_otroErrorVisible) {
-                                                            setState(() =>
-                                                                _otroErrorVisible =
-                                                                    false);
-                                                          }
-                                                        },
-                                                        style: const TextStyle(
-                                                            color:
-                                                                Colors.black87),
-                                                        decoration:
-                                                            InputDecoration(
-                                                          hintText:
-                                                              'Describe la falla con tus palabras...',
-                                                          hintStyle: TextStyle(
-                                                              color: Colors.grey
-                                                                  .shade400),
-                                                          filled: true,
-                                                          fillColor:
-                                                              Colors.white,
-                                                          counterStyle:
-                                                              TextStyle(
-                                                                  color: Colors
-                                                                      .grey
-                                                                      .shade500),
-                                                          // Borde rojo si hay error de validación
-                                                          enabledBorder:
-                                                              OutlineInputBorder(
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        12),
-                                                            borderSide:
-                                                                BorderSide(
-                                                              color: _otroErrorVisible
-                                                                  ? Colors.red
-                                                                  : Colors.grey
-                                                                      .shade300,
-                                                              width:
-                                                                  _otroErrorVisible
-                                                                      ? 2
-                                                                      : 1,
-                                                            ),
-                                                          ),
-                                                          focusedBorder:
-                                                              OutlineInputBorder(
-                                                            borderRadius:
-                                                                BorderRadius
-                                                                    .circular(
-                                                                        12),
-                                                            borderSide:
-                                                                const BorderSide(
-                                                                    color: Colors
-                                                                        .black,
-                                                                    width: 2),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      // Mensaje de error inline
-                                                      if (_otroErrorVisible)
-                                                        Padding(
-                                                          padding:
-                                                              const EdgeInsets
-                                                                  .only(
-                                                                  top: 4,
-                                                                  left: 4),
-                                                          child: Row(
-                                                            children: [
-                                                              const Icon(
-                                                                  Icons
-                                                                      .error_outline,
-                                                                  color: Colors
-                                                                      .red,
-                                                                  size: 14),
-                                                              const SizedBox(
-                                                                  width: 4),
-                                                              Text(
-                                                                'Por favor describe el problema antes de enviar',
-                                                                style: TextStyle(
-                                                                    color: Colors
-                                                                        .red
-                                                                        .shade700,
-                                                                    fontSize:
-                                                                        12),
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                )
-                                              : const SizedBox.shrink(),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
-                              ],
-                            ),
-                    ),
+                      // Subcategorías cargadas una vez + opción "Otro" al final
+                      if (_cargandoSubcategorias)
+                        const Padding(
+                          padding: EdgeInsets.all(20),
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else if (_subcategoriasCargadas.isEmpty && _equipoSeleccionado != 'Otros')
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.info_outline, color: Colors.grey.shade500, size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'No hay problemas registrados para esta categoría. Puedes escribir uno personalizado abajo.',
+                                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Column(
+                          children: [
+                            ..._subcategoriasCargadas.map((nombre) => _buildOpcionSintoma(nombre)),
+                            if (_subcategoriasCargadas.isNotEmpty) const SizedBox(height: 8),
+                            _buildOpcionSintoma(_opcionOtro),
+                          ],
+                        ),
+                    ],
 
                     const SizedBox(height: 20),
 
                     // ==========================================
                     // PASO 3: DETALLES ADICIONALES
                     // ==========================================
-                    AnimatedSize(
-                      duration: const Duration(milliseconds: 400),
-                      curve: Curves.easeInOut,
-                      child: _sintomaSeleccionado == null
-                          ? const SizedBox.shrink()
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(height: 20),
-                                _buildHeaderPaso(
-                                  3,
-                                  _esOtro
-                                      ? 'Contexto adicional (Opcional)'
-                                      : 'Detalles adicionales (Opcional)',
-                                  isActive: true,
-                                ),
-                                const SizedBox(height: 16),
-                                TextField(
-                                  controller: _detallesController,
-                                  maxLines: 3,
-                                  style:
-                                      const TextStyle(color: Colors.black87),
-                                  decoration: InputDecoration(
-                                    hintText: _esOtro
-                                        ? 'Ej. Cuándo empezó, si hubo algún evento previo...'
-                                        : 'Ej. Empezó a fallar después de un apagón...',
-                                    hintStyle: TextStyle(
-                                        color: Colors.grey.shade400),
-                                    filled: true,
-                                    fillColor: Colors.white,
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: BorderSide(
-                                          color: Colors.grey.shade200),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      borderSide: const BorderSide(
-                                          color: Colors.black, width: 2),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(height: 100),
-                              ],
-                            ),
-                    ),
+                    if (_sintomaSeleccionado != null) ...[
+                      const SizedBox(height: 20),
+                      _buildHeaderPaso(
+                        3,
+                        _esOtro
+                            ? 'Contexto adicional (Opcional)'
+                            : 'Detalles adicionales (Opcional)',
+                        isActive: true,
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _detallesController,
+                        maxLines: 3,
+                        style: const TextStyle(color: Colors.black87),
+                        decoration: InputDecoration(
+                          hintText: _esOtro
+                              ? 'Ej. Cuándo empezó, si hubo algún evento previo...'
+                              : 'Ej. Empezó a fallar después de un apagón...',
+                          hintStyle: TextStyle(
+                              color: Colors.grey.shade400),
+                          filled: true,
+                          fillColor: Colors.white,
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(
+                                color: Colors.grey.shade200),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                                color: Colors.black, width: 2),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 100),
+                    ],
                   ],
                 ),
               ),
@@ -609,6 +430,130 @@ final Map<String, List<String>> _sintomasPorEquipo = {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildOpcionSintoma(String sintoma) {
+    final isSelected = _sintomaSeleccionado == sintoma;
+    final esOpcionOtro = sintoma == _opcionOtro;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() {
+              _sintomaSeleccionado = sintoma;
+              _otroController.clear();
+              _otroErrorVisible = false;
+            }),
+            borderRadius: BorderRadius.circular(16),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.grey.shade900 : Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: esOpcionOtro && !isSelected
+                      ? Colors.grey.shade400
+                      : isSelected
+                          ? Colors.grey.shade900
+                          : Colors.grey.shade200,
+                  width: esOpcionOtro ? 1.5 : 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    esOpcionOtro
+                        ? (isSelected ? Icons.edit_rounded : Icons.edit_outlined)
+                        : (isSelected
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked),
+                    color: isSelected
+                        ? Colors.white
+                        : esOpcionOtro
+                            ? Colors.grey.shade600
+                            : Colors.grey.shade400,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      sintoma,
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.black87,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        fontSize: 16,
+                        fontStyle: esOpcionOtro ? FontStyle.italic : FontStyle.normal,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          AnimatedSize(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            child: (esOpcionOtro && isSelected)
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TextField(
+                          controller: _otroController,
+                          maxLength: 120,
+                          autofocus: true,
+                          onChanged: (_) {
+                            if (_otroErrorVisible) {
+                              setState(() => _otroErrorVisible = false);
+                            }
+                          },
+                          style: const TextStyle(color: Colors.black87),
+                          decoration: InputDecoration(
+                            hintText: 'Describe la falla con tus palabras...',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
+                            filled: true,
+                            fillColor: Colors.white,
+                            counterStyle: TextStyle(color: Colors.grey.shade500),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: _otroErrorVisible ? Colors.red : Colors.grey.shade300,
+                                width: _otroErrorVisible ? 2 : 1,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.black, width: 2),
+                            ),
+                          ),
+                        ),
+                        if (_otroErrorVisible)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4, left: 4),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.error_outline, color: Colors.red, size: 14),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Por favor describe el problema antes de enviar',
+                                  style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
       ),
     );
   }

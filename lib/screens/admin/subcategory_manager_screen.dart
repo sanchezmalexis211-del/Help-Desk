@@ -223,15 +223,29 @@ class _SubcategoryManagerScreenState extends State<SubcategoryManagerScreen> {
                 .collection('subcategorias')
                 .doc(_categoriaLimpia) // Usamos la versión sin diagonal
                 .collection('items')
-                .where('activo', isEqualTo: true)
-                .orderBy('fechaCreacion', descending: true)
                 .snapshots(),
             builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)));
+              }
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              final items = snapshot.data!.docs;
+              // Filtramos y ordenamos localmente para evitar requerir índices compuestos en Firestore
+              var items = snapshot.data!.docs.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                return data['activo'] == true;
+              }).toList();
+
+              items.sort((a, b) {
+                final dataA = a.data() as Map<String, dynamic>;
+                final dataB = b.data() as Map<String, dynamic>;
+                final fechaA = (dataA['fechaCreacion'] as Timestamp?)?.toDate() ?? DateTime.now();
+                final fechaB = (dataB['fechaCreacion'] as Timestamp?)?.toDate() ?? DateTime.now();
+                return fechaB.compareTo(fechaA);
+              });
+
               if (items.isEmpty) {
                 return Center(
                   child: Padding(

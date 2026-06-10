@@ -4,6 +4,7 @@ class TicketModel {
   String? id;
   String descripcion;
   String categoria;
+  String subcategoria; // <-- NUEVO
   String prioridad;
   String estado;          // Usaremos los estados requeridos: 'Abierto', 'En proceso', 'Cerrado'
   DateTime fechaCreacion;
@@ -15,6 +16,7 @@ class TicketModel {
     this.id,
     required this.descripcion,
     required this.categoria,
+    required this.subcategoria, // <-- NUEVO
     required this.prioridad,
     required this.estado,
     required this.fechaCreacion,
@@ -36,6 +38,7 @@ class TicketModel {
     return {
       'descripcion': descripcion,
       'categoria': categoria,
+      'subcategoria': subcategoria,
       'prioridad': prioridad,
       'estado': estado,
       'fechaCreacion': FieldValue.serverTimestamp(), 
@@ -55,6 +58,7 @@ class TicketModel {
       id: documentId,
       descripcion: map['descripcion'] ?? '',
       categoria: map['categoria'] ?? 'General',
+      subcategoria: map['subcategoria'] ?? 'General',
       prioridad: map['prioridad'] ?? 'Media',
       estado: map['estado'] ?? 'Abierto', // Si no tiene estado, por defecto inicia 'Abierto'
       fechaCreacion: fechaParsed,

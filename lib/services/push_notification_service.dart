@@ -17,25 +17,29 @@ class PushNotificationService {
       return;
     }
 
-    NotificationSettings settings = await _firebaseMessaging.requestPermission(
-      alert: true, badge: true, sound: true,
-    );
+    try {
+      NotificationSettings settings = await _firebaseMessaging.requestPermission(
+        alert: true, badge: true, sound: true,
+      );
 
-    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
-      print('✅ Permisos de notificación concedidos');
-    }
-
-    String? token = await _firebaseMessaging.getToken();
-    await _firebaseMessaging.subscribeToTopic('alertas_admin');
-    print('📡 Dispositivo suscrito al canal alertas_admin. Token: $token');
-
-    FirebaseMessaging.onBackgroundMessage(_backgroundHandler);
-
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      if (message.notification != null) {
-        print('📩 Título: ${message.notification!.title}');
+      if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+        print('✅ Permisos de notificación concedidos');
       }
-    });
+
+      String? token = await _firebaseMessaging.getToken();
+      await _firebaseMessaging.subscribeToTopic('alertas_admin');
+      print('📡 Dispositivo suscrito al canal alertas_admin. Token: $token');
+
+      FirebaseMessaging.onBackgroundMessage(_backgroundHandler);
+
+      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+        if (message.notification != null) {
+          print('📩 Título: \${message.notification!.title}');
+        }
+      });
+    } catch (e) {
+      print('⚠️ Error al inicializar PushNotifications (se omite para no bloquear la app): \$e');
+    }
   }
 
   // =========================================================================

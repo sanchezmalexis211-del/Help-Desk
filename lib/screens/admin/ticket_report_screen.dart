@@ -1,6 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:excel/excel.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 /// Pantalla para generar reportes en tabla de tickets.
 /// Ruta sugerida: lib/screens/admin/ticket_report_screen.dart
@@ -120,8 +124,8 @@ class _TicketReportScreenState extends State<TicketReportScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.download_rounded, color: Colors.white),
-            tooltip: 'Exportar a CSV',
-            onPressed: _exportarCSV,
+            tooltip: 'Exportar a Excel',
+            onPressed: _exportarExcel,
           ),
         ],
       ),
@@ -222,6 +226,12 @@ class _TicketReportScreenState extends State<TicketReportScreen> {
                                       fontWeight: FontWeight.bold)),
                             ),
                             DataColumn(
+                              label: Text('Subcategoría',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold)),
+                            ),
+                            DataColumn(
                               label: Text('Prioridad',
                                   style: TextStyle(
                                       color: Colors.white,
@@ -264,6 +274,19 @@ class _TicketReportScreenState extends State<TicketReportScreen> {
                                       t['categoria'] ?? '-',
                                       style: const TextStyle(
                                           fontWeight: FontWeight.w600),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                DataCell(
+                                  SizedBox(
+                                    width: 100,
+                                    child: Text(
+                                      t['subcategoria'] ?? '-',
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.w500,
+                                          fontSize: 12),
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -379,7 +402,7 @@ class _TicketReportScreenState extends State<TicketReportScreen> {
     );
   }
 
-  void _exportarCSV() {
+  Future<void> _exportarExcel() async {
     if (_tickets.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -389,51 +412,76 @@ class _TicketReportScreenState extends State<TicketReportScreen> {
       return;
     }
 
-    // Generar CSV en memoria
-    StringBuffer csv = StringBuffer();
-    csv.writeln(
-        'ID,Categoría,Descripción,Prioridad,Estado,Técnico,Días Abierto,Fecha Creación,Nota Técnica');
+    try {
+      var excel = Excel.createExcel();
+      Sheet sheetObject = excel['Reporte Tickets'];
+      excel.setDefaultSheet('Reporte Tickets');
 
-    for (final t in _tickets) {
-      final dias = _diasAbierto(t['fechaCreacion'] as Timestamp?);
-      final fecha = _formatoFecha(t['fechaCreacion'] as Timestamp?);
+      // Crear encabezados
+      sheetObject.appendRow([
+        TextCellValue('ID'),
+        TextCellValue('Categoría'),
+        TextCellValue('Subcategoría'),
+        TextCellValue('Descripción'),
+        TextCellValue('Prioridad'),
+        TextCellValue('Estado'),
+        TextCellValue('Técnico'),
+        TextCellValue('Días Abierto'),
+        TextCellValue('Fecha Creación'),
+        TextCellValue('Nota Técnica'),
+      ]);
 
-      csv.writeln(
-        '"${t['id'] ?? ''}","${t['categoria'] ?? ''}","${(t['descripcion'] ?? '').replaceAll('"', '""')}","${t['prioridad'] ?? ''}","${t['estado'] ?? ''}","${t['agenteAsignado'] ?? 'Sin asignar'}","$dias","$fecha","${(t['notaTecnica'] ?? '').replaceAll('"', '""')}"',
+      // Llenar datos
+      for (final t in _tickets) {
+        final dias = _diasAbierto(t['fechaCreacion'] as Timestamp?);
+        final fecha = _formatoFecha(t['fechaCreacion'] as Timestamp?);
+
+        sheetObject.appendRow([
+          TextCellValue(t['id']?.toString() ?? ''),
+          TextCellValue(t['categoria']?.toString() ?? ''),
+          TextCellValue(t['subcategoria']?.toString() ?? ''),
+          TextCellValue(t['descripcion']?.toString() ?? ''),
+          TextCellValue(t['prioridad']?.toString() ?? ''),
+          TextCellValue(t['estado']?.toString() ?? ''),
+          TextCellValue(t['agenteAsignado']?.toString() ?? 'Sin asignar'),
+          IntCellValue(dias),
+          TextCellValue(fecha),
+          TextCellValue(t['notaTecnica']?.toString() ?? ''),
+        ]);
+      }
+
+      // Eliminar hoja por defecto si se creó una nueva
+      if (excel.sheets.containsKey('Sheet1')) {
+        excel.delete('Sheet1');
+      }
+
+      // Guardar en directorio temporal
+      final bytes = excel.save();
+      if (bytes == null) throw Exception('No se pudo generar el archivo Excel');
+
+      final dir = await getTemporaryDirectory();
+      final dateStr = DateFormat('yyyyMMdd_HHmmss').format(DateTime.now());
+      final filePath = '${dir.path}/reporte_tickets_$dateStr.xlsx';
+      final file = File(filePath);
+      
+      await file.writeAsBytes(bytes);
+
+      // Compartir archivo
+      final xfile = XFile(filePath);
+      await Share.shareXFiles(
+        [xfile],
+        text: 'Reporte de Tickets Generado',
       );
-    }
 
-    // Mostrar diálogo con opción de copiar
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Reporte Generado'),
-        content: const Text(
-            'Contenido CSV generado. Cópialo para pegar en Excel o Google Sheets.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cerrar'),
-          ),
-          TextButton(
-            onPressed: () {
-              // En un app real aquí copiarías al clipboard
-              // Por ahora solo mostramos el mensaje
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                      'CSV copiado al portapapeles. Pégalo en Excel.'),
-                  backgroundColor: Colors.green,
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-            child: const Text('Copiar'),
-          ),
-        ],
-      ),
-    );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text('Error al exportar a Excel: $e'),
+              backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 }
 

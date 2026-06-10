@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme.dart';
 import '../../widgets/ticket_card.dart';
+import '../shared/ticket_detail_screen.dart';
 import 'new_ticket.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -113,6 +114,7 @@ class HomeScreen extends StatelessWidget {
               final data = tickets[index].data() as Map<String, dynamic>;
 
               final String categoria = data['categoria'] ?? 'General';
+              final String subcategoria = data['subcategoria'] ?? '';
               final String descripcion = data['descripcion'] ?? 'Sin descripción';
               final String prioridad = data['prioridad'] ?? 'Media';
               final String estado = data['estado'] ?? 'Nuevos';
@@ -123,17 +125,35 @@ class HomeScreen extends StatelessWidget {
               final bool esCritica =
                   prioridad == 'Crítica' || prioridad == 'Alta';
 
+              final String tituloCompleto = subcategoria.isNotEmpty
+                  ? '$categoria - $subcategoria'
+                  : categoria;
+
               return Padding(
                 padding: const EdgeInsets.only(bottom: 12.0),
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    TicketCard(
-                      titulo: categoria,
-                      descripcion: descripcion,
-                      icono: _iconoCategoria(categoria),
-                      colorEstado: info.color,
-                      tiempo: info.etiqueta,
+                    InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => TicketDetailScreen(
+                              ticketId: tickets[index].id,
+                              data: data,
+                            ),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: TicketCard(
+                        titulo: tituloCompleto,
+                        descripcion: descripcion,
+                        icono: _iconoCategoria(categoria),
+                        colorEstado: info.color,
+                        tiempo: info.etiqueta,
+                      ),
                     ),
 
                     // Badge de prioridad alta/crítica
